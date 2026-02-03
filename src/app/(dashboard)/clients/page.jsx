@@ -30,6 +30,7 @@ export default function ClientsPage() {
   const { clients, addClient, updateClient, deleteClient } = useStore()
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [editingClient, setEditingClient] = useState(null)
+  const [isSubmitting, setIsSubmitting] = useState(false)
   const [formData, setFormData] = useState({
     name: "",
     email: "",
@@ -73,19 +74,30 @@ export default function ClientsPage() {
     resetForm()
   }
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault()
-    if (editingClient) {
-      updateClient(editingClient.id, formData)
-    } else {
-      addClient(formData)
+    setIsSubmitting(true)
+    try {
+      if (editingClient) {
+        await updateClient(editingClient.id, formData)
+      } else {
+        await addClient(formData)
+      }
+      handleCloseDialog()
+    } catch (err) {
+      console.error("Failed to save client:", err)
+    } finally {
+      setIsSubmitting(false)
     }
-    handleCloseDialog()
   }
 
-  const handleDelete = (id) => {
+  const handleDelete = async (id) => {
     if (confirm("Are you sure you want to delete this client?")) {
-      deleteClient(id)
+      try {
+        await deleteClient(id)
+      } catch (err) {
+        console.error("Failed to delete client:", err)
+      }
     }
   }
 
@@ -257,11 +269,11 @@ export default function ClientsPage() {
               </div>
             </div>
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={handleCloseDialog}>
+              <Button type="button" variant="outline" onClick={handleCloseDialog} disabled={isSubmitting}>
                 Cancel
               </Button>
-              <Button type="submit">
-                {editingClient ? "Update" : "Create"}
+              <Button type="submit" disabled={isSubmitting}>
+                {isSubmitting ? "Saving..." : editingClient ? "Update" : "Create"}
               </Button>
             </DialogFooter>
           </form>

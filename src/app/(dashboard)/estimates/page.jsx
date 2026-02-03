@@ -54,6 +54,7 @@ export default function EstimatesPage() {
   } = useStore()
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [editingEstimate, setEditingEstimate] = useState(null)
+  const [isSubmitting, setIsSubmitting] = useState(false)
   const [formData, setFormData] = useState({
     clientId: "",
     validUntil: "",
@@ -91,29 +92,48 @@ export default function EstimatesPage() {
     resetForm()
   }
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault()
-    if (editingEstimate) {
-      updateEstimate(editingEstimate.id, formData)
-    } else {
-      addEstimate(formData)
+    setIsSubmitting(true)
+    try {
+      if (editingEstimate) {
+        await updateEstimate(editingEstimate.id, formData)
+      } else {
+        await addEstimate(formData)
+      }
+      handleCloseDialog()
+    } catch (err) {
+      console.error("Failed to save estimate:", err)
+    } finally {
+      setIsSubmitting(false)
     }
-    handleCloseDialog()
   }
 
-  const handleDelete = (id) => {
+  const handleDelete = async (id) => {
     if (confirm("Are you sure you want to delete this estimate?")) {
-      deleteEstimate(id)
+      try {
+        await deleteEstimate(id)
+      } catch (err) {
+        console.error("Failed to delete estimate:", err)
+      }
     }
   }
 
-  const handleSend = (id) => {
-    updateEstimate(id, { status: "sent" })
+  const handleSend = async (id) => {
+    try {
+      await updateEstimate(id, { status: "sent" })
+    } catch (err) {
+      console.error("Failed to send estimate:", err)
+    }
   }
 
-  const handleConvertToInvoice = (id) => {
+  const handleConvertToInvoice = async (id) => {
     if (confirm("Convert this estimate to an invoice?")) {
-      convertEstimateToInvoice(id)
+      try {
+        await convertEstimateToInvoice(id)
+      } catch (err) {
+        console.error("Failed to convert estimate:", err)
+      }
     }
   }
 
@@ -281,11 +301,11 @@ export default function EstimatesPage() {
               </div>
             </div>
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={handleCloseDialog}>
+              <Button type="button" variant="outline" onClick={handleCloseDialog} disabled={isSubmitting}>
                 Cancel
               </Button>
-              <Button type="submit" disabled={!formData.clientId}>
-                {editingEstimate ? "Update" : "Create"}
+              <Button type="submit" disabled={!formData.clientId || isSubmitting}>
+                {isSubmitting ? "Saving..." : editingEstimate ? "Update" : "Create"}
               </Button>
             </DialogFooter>
           </form>

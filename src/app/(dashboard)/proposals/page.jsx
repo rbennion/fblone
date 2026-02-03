@@ -54,6 +54,7 @@ export default function ProposalsPage() {
   } = useStore()
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [editingProposal, setEditingProposal] = useState(null)
+  const [isSubmitting, setIsSubmitting] = useState(false)
   const [formData, setFormData] = useState({
     clientId: "",
     title: "",
@@ -97,29 +98,48 @@ export default function ProposalsPage() {
     resetForm()
   }
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault()
-    if (editingProposal) {
-      updateProposal(editingProposal.id, formData)
-    } else {
-      addProposal(formData)
+    setIsSubmitting(true)
+    try {
+      if (editingProposal) {
+        await updateProposal(editingProposal.id, formData)
+      } else {
+        await addProposal(formData)
+      }
+      handleCloseDialog()
+    } catch (err) {
+      console.error("Failed to save proposal:", err)
+    } finally {
+      setIsSubmitting(false)
     }
-    handleCloseDialog()
   }
 
-  const handleDelete = (id) => {
+  const handleDelete = async (id) => {
     if (confirm("Are you sure you want to delete this proposal?")) {
-      deleteProposal(id)
+      try {
+        await deleteProposal(id)
+      } catch (err) {
+        console.error("Failed to delete proposal:", err)
+      }
     }
   }
 
-  const handleSend = (id) => {
-    updateProposal(id, { status: "sent" })
+  const handleSend = async (id) => {
+    try {
+      await updateProposal(id, { status: "sent" })
+    } catch (err) {
+      console.error("Failed to send proposal:", err)
+    }
   }
 
-  const handleConvertToEstimate = (id) => {
+  const handleConvertToEstimate = async (id) => {
     if (confirm("Convert this proposal to an estimate?")) {
-      convertProposalToEstimate(id)
+      try {
+        await convertProposalToEstimate(id)
+      } catch (err) {
+        console.error("Failed to convert proposal:", err)
+      }
     }
   }
 
@@ -315,11 +335,11 @@ export default function ProposalsPage() {
               </div>
             </div>
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={handleCloseDialog}>
+              <Button type="button" variant="outline" onClick={handleCloseDialog} disabled={isSubmitting}>
                 Cancel
               </Button>
-              <Button type="submit" disabled={!formData.clientId || !formData.title}>
-                {editingProposal ? "Update" : "Create"}
+              <Button type="submit" disabled={!formData.clientId || !formData.title || isSubmitting}>
+                {isSubmitting ? "Saving..." : editingProposal ? "Update" : "Create"}
               </Button>
             </DialogFooter>
           </form>

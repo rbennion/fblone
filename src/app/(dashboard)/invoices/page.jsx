@@ -54,6 +54,7 @@ export default function InvoicesPage() {
   } = useStore()
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [editingInvoice, setEditingInvoice] = useState(null)
+  const [isSubmitting, setIsSubmitting] = useState(false)
   const [formData, setFormData] = useState({
     clientId: "",
     dueDate: "",
@@ -91,33 +92,56 @@ export default function InvoicesPage() {
     resetForm()
   }
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault()
-    if (editingInvoice) {
-      updateInvoice(editingInvoice.id, formData)
-    } else {
-      addInvoice(formData)
+    setIsSubmitting(true)
+    try {
+      if (editingInvoice) {
+        await updateInvoice(editingInvoice.id, formData)
+      } else {
+        await addInvoice(formData)
+      }
+      handleCloseDialog()
+    } catch (err) {
+      console.error("Failed to save invoice:", err)
+    } finally {
+      setIsSubmitting(false)
     }
-    handleCloseDialog()
   }
 
-  const handleDelete = (id) => {
+  const handleDelete = async (id) => {
     if (confirm("Are you sure you want to delete this invoice?")) {
-      deleteInvoice(id)
+      try {
+        await deleteInvoice(id)
+      } catch (err) {
+        console.error("Failed to delete invoice:", err)
+      }
     }
   }
 
-  const handleSend = (id) => {
-    updateInvoice(id, { status: "sent" })
+  const handleSend = async (id) => {
+    try {
+      await updateInvoice(id, { status: "sent" })
+    } catch (err) {
+      console.error("Failed to send invoice:", err)
+    }
   }
 
-  const handleMarkPaid = (id) => {
-    updateInvoice(id, { status: "paid", paidAt: new Date().toISOString() })
+  const handleMarkPaid = async (id) => {
+    try {
+      await updateInvoice(id, { status: "paid", paidAt: new Date().toISOString() })
+    } catch (err) {
+      console.error("Failed to mark invoice as paid:", err)
+    }
   }
 
-  const handleCancel = (id) => {
+  const handleCancel = async (id) => {
     if (confirm("Cancel this invoice?")) {
-      updateInvoice(id, { status: "cancelled" })
+      try {
+        await updateInvoice(id, { status: "cancelled" })
+      } catch (err) {
+        console.error("Failed to cancel invoice:", err)
+      }
     }
   }
 
@@ -301,11 +325,11 @@ export default function InvoicesPage() {
               </div>
             </div>
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={handleCloseDialog}>
+              <Button type="button" variant="outline" onClick={handleCloseDialog} disabled={isSubmitting}>
                 Cancel
               </Button>
-              <Button type="submit" disabled={!formData.clientId}>
-                {editingInvoice ? "Update" : "Create"}
+              <Button type="submit" disabled={!formData.clientId || isSubmitting}>
+                {isSubmitting ? "Saving..." : editingInvoice ? "Update" : "Create"}
               </Button>
             </DialogFooter>
           </form>

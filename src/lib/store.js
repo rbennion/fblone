@@ -1,159 +1,356 @@
 "use client"
 
-import { createContext, useContext, useState, useEffect } from "react"
-import { generateId } from "./utils"
+import { createContext, useContext, useState, useEffect, useCallback } from "react"
+import { supabase, isSupabaseConfigured } from "./supabase"
 
 const StoreContext = createContext(null)
 
-const STORAGE_KEY = "freshbooks-clone-data"
-
-const defaultData = {
-  clients: [],
-  estimates: [],
-  proposals: [],
-  invoices: [],
-}
-
 export function StoreProvider({ children }) {
-  const [data, setData] = useState(defaultData)
+  const [clients, setClients] = useState([])
+  const [estimates, setEstimates] = useState([])
+  const [proposals, setProposals] = useState([])
+  const [invoices, setInvoices] = useState([])
   const [isLoaded, setIsLoaded] = useState(false)
+  const [error, setError] = useState(null)
 
+  // Fetch all data on mount
   useEffect(() => {
-    const stored = localStorage.getItem(STORAGE_KEY)
-    if (stored) {
+    async function fetchData() {
+      if (!isSupabaseConfigured) {
+        setError("Supabase is not configured. Please set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in your .env.local file.")
+        setIsLoaded(true)
+        return
+      }
+
       try {
-        setData(JSON.parse(stored))
-      } catch (e) {
-        console.error("Failed to parse stored data", e)
+        const [clientsRes, estimatesRes, proposalsRes, invoicesRes] = await Promise.all([
+          supabase.from("clients").select("*").order("created_at", { ascending: false }),
+          supabase.from("estimates").select("*").order("created_at", { ascending: false }),
+          supabase.from("proposals").select("*").order("created_at", { ascending: false }),
+          supabase.from("invoices").select("*").order("created_at", { ascending: false }),
+        ])
+
+        if (clientsRes.error) throw clientsRes.error
+        if (estimatesRes.error) throw estimatesRes.error
+        if (proposalsRes.error) throw proposalsRes.error
+        if (invoicesRes.error) throw invoicesRes.error
+
+        setClients(transformFromDb(clientsRes.data))
+        setEstimates(transformFromDb(estimatesRes.data))
+        setProposals(transformFromDb(proposalsRes.data))
+        setInvoices(transformFromDb(invoicesRes.data))
+      } catch (err) {
+        console.error("Failed to fetch data:", err)
+        setError(err.message)
+      } finally {
+        setIsLoaded(true)
       }
     }
-    setIsLoaded(true)
+
+    fetchData()
   }, [])
 
-  useEffect(() => {
-    if (isLoaded) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
-    }
-  }, [data, isLoaded])
+  // Transform database snake_case to camelCase
+  function transformFromDb(rows) {
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      email: row.email,
+      phone: row.phone,
+      company: row.company,
+      address: row.address,
+      notes: row.notes,
+      title: row.title,
+      description: row.description,
+      terms: row.terms,
+      number: row.number,
+      clientId: row.client_id,
+      status: row.status,
+      validUntil: row.valid_until,
+      dueDate: row.due_date,
+      paidAt: row.paid_at,
+      items: row.items || [],
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    }))
+  }
+
+  // Transform camelCase to snake_case for database
+  function transformToDb(data) {
+    const result = {}
+    if (data.name !== undefined) result.name = data.name
+    if (data.email !== undefined) result.email = data.email
+    if (data.phone !== undefined) result.phone = data.phone
+    if (data.company !== undefined) result.company = data.company
+    if (data.address !== undefined) result.address = data.address
+    if (data.notes !== undefined) result.notes = data.notes
+    if (data.title !== undefined) result.title = data.title
+    if (data.description !== undefined) result.description = data.description
+    if (data.terms !== undefined) result.terms = data.terms
+    if (data.clientId !== undefined) result.client_id = data.clientId
+    if (data.status !== undefined) result.status = data.status
+    if (data.validUntil !== undefined) result.valid_until = data.validUntil
+    if (data.dueDate !== undefined) result.due_date = data.dueDate
+    if (data.paidAt !== undefined) result.paid_at = data.paidAt
+    if (data.items !== undefined) result.items = data.items
+    return result
+  }
 
   // Client operations
-  const addClient = (client) => {
-    const newClient = { ...client, id: generateId(), createdAt: new Date().toISOString() }
-    setData((prev) => ({ ...prev, clients: [...prev.clients, newClient] }))
+  const addClient = useCallback(async (client) => {
+    const { data, error } = await supabase
+      .from("clients")
+      .insert(transformToDb(client))
+      .select()
+      .single()
+
+    if (error) {
+      console.error("Failed to add client:", error)
+      throw error
+    }
+
+    const newClient = transformFromDb([data])[0]
+    setClients((prev) => [newClient, ...prev])
     return newClient
-  }
+  }, [])
 
-  const updateClient = (id, updates) => {
-    setData((prev) => ({
-      ...prev,
-      clients: prev.clients.map((c) => (c.id === id ? { ...c, ...updates } : c)),
-    }))
-  }
+  const updateClient = useCallback(async (id, updates) => {
+    const { error } = await supabase
+      .from("clients")
+      .update(transformToDb(updates))
+      .eq("id", id)
 
-  const deleteClient = (id) => {
-    setData((prev) => ({ ...prev, clients: prev.clients.filter((c) => c.id !== id) }))
-  }
+    if (error) {
+      console.error("Failed to update client:", error)
+      throw error
+    }
 
-  const getClient = (id) => data.clients.find((c) => c.id === id)
+    setClients((prev) =>
+      prev.map((c) => (c.id === id ? { ...c, ...updates } : c))
+    )
+  }, [])
+
+  const deleteClient = useCallback(async (id) => {
+    const { error } = await supabase.from("clients").delete().eq("id", id)
+
+    if (error) {
+      console.error("Failed to delete client:", error)
+      throw error
+    }
+
+    setClients((prev) => prev.filter((c) => c.id !== id))
+  }, [])
+
+  const getClient = useCallback((id) => clients.find((c) => c.id === id), [clients])
 
   // Estimate operations
-  const addEstimate = (estimate) => {
-    const number = `EST-${String(data.estimates.length + 1).padStart(4, "0")}`
-    const newEstimate = { ...estimate, id: generateId(), number, createdAt: new Date().toISOString(), status: "draft" }
-    setData((prev) => ({ ...prev, estimates: [...prev.estimates, newEstimate] }))
+  const addEstimate = useCallback(async (estimate) => {
+    // Get next number
+    const { data: numberData } = await supabase.rpc("get_next_number", {
+      counter_id: "estimate",
+      prefix: "EST",
+    })
+
+    const { data, error } = await supabase
+      .from("estimates")
+      .insert({
+        ...transformToDb(estimate),
+        number: numberData || `EST-${Date.now()}`,
+        status: "draft",
+      })
+      .select()
+      .single()
+
+    if (error) {
+      console.error("Failed to add estimate:", error)
+      throw error
+    }
+
+    const newEstimate = transformFromDb([data])[0]
+    setEstimates((prev) => [newEstimate, ...prev])
     return newEstimate
-  }
+  }, [])
 
-  const updateEstimate = (id, updates) => {
-    setData((prev) => ({
-      ...prev,
-      estimates: prev.estimates.map((e) => (e.id === id ? { ...e, ...updates } : e)),
-    }))
-  }
+  const updateEstimate = useCallback(async (id, updates) => {
+    const { error } = await supabase
+      .from("estimates")
+      .update(transformToDb(updates))
+      .eq("id", id)
 
-  const deleteEstimate = (id) => {
-    setData((prev) => ({ ...prev, estimates: prev.estimates.filter((e) => e.id !== id) }))
-  }
+    if (error) {
+      console.error("Failed to update estimate:", error)
+      throw error
+    }
 
-  const getEstimate = (id) => data.estimates.find((e) => e.id === id)
+    setEstimates((prev) =>
+      prev.map((e) => (e.id === id ? { ...e, ...updates } : e))
+    )
+  }, [])
+
+  const deleteEstimate = useCallback(async (id) => {
+    const { error } = await supabase.from("estimates").delete().eq("id", id)
+
+    if (error) {
+      console.error("Failed to delete estimate:", error)
+      throw error
+    }
+
+    setEstimates((prev) => prev.filter((e) => e.id !== id))
+  }, [])
+
+  const getEstimate = useCallback((id) => estimates.find((e) => e.id === id), [estimates])
 
   // Proposal operations
-  const addProposal = (proposal) => {
-    const number = `PROP-${String(data.proposals.length + 1).padStart(4, "0")}`
-    const newProposal = { ...proposal, id: generateId(), number, createdAt: new Date().toISOString(), status: "draft" }
-    setData((prev) => ({ ...prev, proposals: [...prev.proposals, newProposal] }))
+  const addProposal = useCallback(async (proposal) => {
+    const { data: numberData } = await supabase.rpc("get_next_number", {
+      counter_id: "proposal",
+      prefix: "PROP",
+    })
+
+    const { data, error } = await supabase
+      .from("proposals")
+      .insert({
+        ...transformToDb(proposal),
+        number: numberData || `PROP-${Date.now()}`,
+        status: "draft",
+      })
+      .select()
+      .single()
+
+    if (error) {
+      console.error("Failed to add proposal:", error)
+      throw error
+    }
+
+    const newProposal = transformFromDb([data])[0]
+    setProposals((prev) => [newProposal, ...prev])
     return newProposal
-  }
+  }, [])
 
-  const updateProposal = (id, updates) => {
-    setData((prev) => ({
-      ...prev,
-      proposals: prev.proposals.map((p) => (p.id === id ? { ...p, ...updates } : p)),
-    }))
-  }
+  const updateProposal = useCallback(async (id, updates) => {
+    const { error } = await supabase
+      .from("proposals")
+      .update(transformToDb(updates))
+      .eq("id", id)
 
-  const deleteProposal = (id) => {
-    setData((prev) => ({ ...prev, proposals: prev.proposals.filter((p) => p.id !== id) }))
-  }
+    if (error) {
+      console.error("Failed to update proposal:", error)
+      throw error
+    }
 
-  const getProposal = (id) => data.proposals.find((p) => p.id === id)
+    setProposals((prev) =>
+      prev.map((p) => (p.id === id ? { ...p, ...updates } : p))
+    )
+  }, [])
+
+  const deleteProposal = useCallback(async (id) => {
+    const { error } = await supabase.from("proposals").delete().eq("id", id)
+
+    if (error) {
+      console.error("Failed to delete proposal:", error)
+      throw error
+    }
+
+    setProposals((prev) => prev.filter((p) => p.id !== id))
+  }, [])
+
+  const getProposal = useCallback((id) => proposals.find((p) => p.id === id), [proposals])
 
   // Invoice operations
-  const addInvoice = (invoice) => {
-    const number = `INV-${String(data.invoices.length + 1).padStart(4, "0")}`
-    const newInvoice = { ...invoice, id: generateId(), number, createdAt: new Date().toISOString(), status: "draft" }
-    setData((prev) => ({ ...prev, invoices: [...prev.invoices, newInvoice] }))
+  const addInvoice = useCallback(async (invoice) => {
+    const { data: numberData } = await supabase.rpc("get_next_number", {
+      counter_id: "invoice",
+      prefix: "INV",
+    })
+
+    const { data, error } = await supabase
+      .from("invoices")
+      .insert({
+        ...transformToDb(invoice),
+        number: numberData || `INV-${Date.now()}`,
+        status: "draft",
+      })
+      .select()
+      .single()
+
+    if (error) {
+      console.error("Failed to add invoice:", error)
+      throw error
+    }
+
+    const newInvoice = transformFromDb([data])[0]
+    setInvoices((prev) => [newInvoice, ...prev])
     return newInvoice
-  }
+  }, [])
 
-  const updateInvoice = (id, updates) => {
-    setData((prev) => ({
-      ...prev,
-      invoices: prev.invoices.map((i) => (i.id === id ? { ...i, ...updates } : i)),
-    }))
-  }
+  const updateInvoice = useCallback(async (id, updates) => {
+    const { error } = await supabase
+      .from("invoices")
+      .update(transformToDb(updates))
+      .eq("id", id)
 
-  const deleteInvoice = (id) => {
-    setData((prev) => ({ ...prev, invoices: prev.invoices.filter((i) => i.id !== id) }))
-  }
+    if (error) {
+      console.error("Failed to update invoice:", error)
+      throw error
+    }
 
-  const getInvoice = (id) => data.invoices.find((i) => i.id === id)
+    setInvoices((prev) =>
+      prev.map((i) => (i.id === id ? { ...i, ...updates } : i))
+    )
+  }, [])
+
+  const deleteInvoice = useCallback(async (id) => {
+    const { error } = await supabase.from("invoices").delete().eq("id", id)
+
+    if (error) {
+      console.error("Failed to delete invoice:", error)
+      throw error
+    }
+
+    setInvoices((prev) => prev.filter((i) => i.id !== id))
+  }, [])
+
+  const getInvoice = useCallback((id) => invoices.find((i) => i.id === id), [invoices])
 
   // Convert estimate to invoice
-  const convertEstimateToInvoice = (estimateId) => {
+  const convertEstimateToInvoice = useCallback(async (estimateId) => {
     const estimate = getEstimate(estimateId)
     if (!estimate) return null
 
-    const invoice = addInvoice({
+    const invoice = await addInvoice({
       clientId: estimate.clientId,
       items: estimate.items,
       notes: estimate.notes,
       dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
     })
 
-    updateEstimate(estimateId, { status: "accepted", convertedToInvoice: invoice.id })
+    await updateEstimate(estimateId, { status: "accepted" })
     return invoice
-  }
+  }, [getEstimate, addInvoice, updateEstimate])
 
   // Convert proposal to estimate
-  const convertProposalToEstimate = (proposalId) => {
+  const convertProposalToEstimate = useCallback(async (proposalId) => {
     const proposal = getProposal(proposalId)
     if (!proposal) return null
 
-    const estimate = addEstimate({
+    const estimate = await addEstimate({
       clientId: proposal.clientId,
       items: proposal.items || [],
       notes: proposal.notes,
       validUntil: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
     })
 
-    updateProposal(proposalId, { status: "accepted", convertedToEstimate: estimate.id })
+    await updateProposal(proposalId, { status: "accepted" })
     return estimate
-  }
+  }, [getProposal, addEstimate, updateProposal])
 
   const value = {
-    ...data,
+    clients,
+    estimates,
+    proposals,
+    invoices,
     isLoaded,
+    error,
     addClient,
     updateClient,
     deleteClient,
